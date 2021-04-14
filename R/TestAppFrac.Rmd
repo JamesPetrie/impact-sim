@@ -10,13 +10,55 @@ output: html_notebook
 library(ggplot2)
 library(data.table)
 library(plyr)
+setwd("~/Desktop/Covid/adoptionAnalysis/impact-sim/")
 
 
-simRes = fread("simResults.csv" )
+simRes = fread("remote/simResults.csv" )
+simRes[, ID := paste0(ID,sim)]
+simRes$sim = NULL
+ids = unique(simRes$ID)
 
+sumDt= simRes[, list(TotalInfected = sum(weekly_cases), TotalAppInfected = sum(frac1*weekly_cases, na.rm = TRUE), R = first(effective_r0)) , by= list(FracApp = fracApp, Mixing = mixing, ID)]
   
-plotDt = simRes[, list(meanInfected = sum(weekly_cases/n.sim , na.rm = TRUE), meanAppInfected = sum(frac1*weekly_cases/fracApp/n.sim , na.rm = TRUE),
-                         meanR0 = sum(effective_r0*weekly_cases)/sum(weekly_cases)), by=list(fracApp, mixing)]
+
+getStatistics = function(dt){
+  meanInfected = mean(dt$TotalInfected)
+  meanAppInfected = mean(dt$TotalAppInfected/dt$FracApp)
+  meanR = mean(dt$R)
+  #meanR = sum(dt$R*dt$TotalInfected)/sum(dt$TotalInfected)
+  return(data.table(MeanR = meanR, MeanAppInfected = meanAppInfected, MeanInfected = meanInfected))
+}
+
+params = data.table(expand.grid(fracApp = unique(simRes$fracApp), mixing = unique(simRes$mixing)))
+plotDt = mdply(params,  function(fracApp, mixing){
+  dt = sumDt[FracApp == fracApp & mixing == Mixing]
+  dtRes = getStatistics(dt)
+  dtRes[, Mixing := mixing]
+  dtRes[, FracApp := fracApp]
+  
+  sampleResults = rbindlist(llply(1:1000, function(i){
+    sampleDt = sample_n(dt,nrow(dt), replace = TRUE)
+    return(getStatistics(sampleDt))
+  }))
+  dtRes[, LowR := quantile(sampleResults$MeanR, 0.025)]
+  dtRes[, HighR := quantile(sampleResults$MeanR, 0.975)]
+  
+  dtRes[, LowAppInfected := quantile(sampleResults$MeanAppInfected, 0.025)]
+  dtRes[, HighAppInfected := quantile(sampleResults$MeanAppInfected, 0.975)]
+  
+  dtRes[, LowInfected := quantile(sampleResults$MeanInfected, 0.025)]
+  dtRes[, HighInfected := quantile(sampleResults$MeanInfected, 0.975)]
+  
+  return(dtRes)
+  
+})
+
+#plotDt = sumDt[, list(meanInfected = mean(TotalInfected), meanAppInfected = mean(TotalAppInfected/fracApp), meanR = mean(R)), by = list(fracApp, mixing)]
+
+#weeks = unique(simRes[,.N, by = list(ID, sim)]$N)
+#n.sim = nrow(simRes)/weeks
+
+#plotDt = simRes[, list(meanInfected = sum(weekly_cases/n.sim , na.rm = TRUE), meanAppInfected = sum(frac1*weekly_cases/fracApp/n.sim , na.rm = TRUE), meanR0 = sum(effective_r0*weekly_cases)/sum(weekly_cases)), by=list(fracApp, mixing)]
 
 # Some of the curves when the population is completely mixed
 #ggplot(simRes[mixing == 0.5], aes(x = week, y = weekly_cases*frac1/fracApp, colour = as.factor(fracApp), style = mixing, group = paste(fracApp, mixing, sim))) + geom_line(alpha = 0.22,  show.legend = TRUE)
@@ -34,8 +76,10 @@ plotDt = simRes[, list(meanInfected = sum(weekly_cases/n.sim , na.rm = TRUE), me
 #ggplot(plotDt, aes(x = fracApp, y = mixing, z = totalInfected)) + stat_summary_2d(bins = c(10,5))
 
 
-ggplot(plotDt, aes(x = fracApp, y = meanInfected, colour = as.factor(mixing), group = as.factor(mixing))) + geom_line()
+ggplot(plotDt, aes(x = FracApp, y = MeanInfected, group = as.factor(Mixing))) + geom_line(aes( colour = as.factor(Mixing))) + geom_ribbon(aes(ymin=LowInfected , ymax=HighInfected, group = as.factor(Mixing), fill = as.factor(Mixing) ), alpha = 0.15)
 
-ggplot(plotDt, aes(x = fracApp, y = meanAppInfected, colour = as.factor(mixing), group = as.factor(mixing))) + geom_line()
+ggplot(plotDt, aes(x = fracApp, y = MeanAppInfected, group = as.factor(mixing))) + geom_line(aes(colour = as.factor(mixing))) + geom_ribbon(aes(ymin=LowAppInfected , ymax=HighAppInfected, group = as.factor(Mixing), fill = as.factor(Mixing) ), alpha = 0.15)
+
+ggplot(plotDt, aes(x = fracApp, y = MeanR)) + geom_line(aes(colour = as.factor(Mixing))) + geom_ribbon(aes(ymin=LowR , ymax=HighR, fill = as.factor(Mixing) ), alpha = 0.15)
 ```
 
